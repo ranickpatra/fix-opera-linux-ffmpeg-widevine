@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 if [[ $(whoami) != "root" ]]; then
 	printf 'Try to run it with sudo\n'
@@ -10,22 +10,22 @@ if [[ $(uname -m) != "x86_64" ]]; then
 	exit 1
 fi
 
-if ! which unzip > /dev/null; then
+if ! command -v unzip 2>&1 /dev/null; then
 	printf '\033[1munzip\033[0m package must be installed to run this script\n'
 	exit 1
 fi
 
-if ! which curl > /dev/null; then
+if ! command -v curl 2>&1 /dev/null; then
 	printf '\033[1mcurl\033[0m package must be installed to run this script\n'
 	exit 1
 fi
 
-if ! which jq > /dev/null; then
+if ! command -v jq 2>&1 /dev/null; then
 	printf '\033[1mjq\033[0m package must be installed to run this script\n'
 	exit 1
 fi
 
-if which pacman &> /dev/null; then
+if command -v pacman &> /dev/null; then
 	ARCH_SYSTEM=true
 fi
 
