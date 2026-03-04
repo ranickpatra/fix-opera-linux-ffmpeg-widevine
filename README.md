@@ -34,7 +34,11 @@
 
     `sudo ./scripts/fix-opera.sh`
 
-4. Run install script and answer few questions.
+4. Make install.sh executable
+
+   `chmod +x ./install.sh`
+
+5. Run install script and answer few questions.
 
     `sudo ./install.sh`
 

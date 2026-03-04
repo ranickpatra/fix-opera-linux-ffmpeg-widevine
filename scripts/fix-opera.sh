@@ -10,17 +10,17 @@ if [[ $(uname -m) != "x86_64" ]]; then
 	exit 1
 fi
 
-if command -v unzip > /dev/null; then
+if ! command -v unzip > /dev/null; then
 	printf '\033[1munzip\033[0m package must be installed to run this script\n'
 	exit 1
 fi
 
-if command -v curl > /dev/null; then
+if ! command -v curl > /dev/null; then
 	printf '\033[1mcurl\033[0m package must be installed to run this script\n'
 	exit 1
 fi
 
-if command -v jq > /dev/null; then
+if ! command -v jq > /dev/null; then
 	printf '\033[1mjq\033[0m package must be installed to run this script\n'
 	exit 1
 fi
