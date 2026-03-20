@@ -49,6 +49,10 @@ if [ -x "$(command -v opera-beta)" ]; then
   OPERA_VERSIONS+=("opera-beta")
 fi
 
+if [ -x "$(command -v opera-gx)" ]; then
+  OPERA_VERSIONS+=("opera-gx")
+fi
+
 #Getting download links
 printf 'Getting download links...\n'
 
