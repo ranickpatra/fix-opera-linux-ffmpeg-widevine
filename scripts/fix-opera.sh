@@ -53,51 +53,88 @@ if [ -x "$(command -v opera-gx)" ]; then
   OPERA_VERSIONS+=("opera-gx")
 fi
 
+get_chromium_major() {
+  local opera_dir="$1"
+  local opera_name="$2"
+  local version=""
+  for bin in "$opera_dir/$opera_name" "$opera_dir/opera"; do
+    if [[ -f "$bin" ]]; then
+      version=$(grep -ao 'Chrome/[0-9]\+' "$bin" 2>/dev/null | head -1 | grep -o '[0-9]\+')
+      if [[ -n "$version" ]]; then
+        echo "$version"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+get_ffmpeg_url_for_chromium() {
+  local chromium_major="$1"
+  local best_tag=""
+  local best_url=""
+  for releases_json in "$RELEASES_MAIN" "$RELEASES_ALT"; do
+    local match
+    match=$(echo "$releases_json" | jq -r --arg ver "$chromium_major" '
+      [.[] | select((.body // "") | test("Chromium " + $ver + "\\."))]
+      | sort_by(.published_at)
+      | if length > 0 then .[-1] | "\(.tag_name)\t\(.assets[0].browser_download_url)" else empty end
+    ')
+    if [[ -n "$match" ]]; then
+      local tag url
+      tag=$(echo "$match" | cut -f1)
+      url=$(echo "$match" | cut -f2)
+      if [[ -z "$best_tag" || "$tag" > "$best_tag" ]]; then
+        best_tag="$tag"
+        best_url="$url"
+      fi
+    fi
+  done
+  if [[ -n "$best_url" ]]; then
+    printf '%s\t%s' "$best_tag" "$best_url"
+    return 0
+  fi
+  return 1
+}
+
+get_latest_ffmpeg_url() {
+  local url_main url_alt
+  url_main=$(echo "$RELEASES_MAIN" | jq -rS 'sort_by(.published_at) | .[-1].assets[0].browser_download_url')
+  url_alt=$(echo "$RELEASES_ALT" | jq -rS 'sort_by(.published_at) | .[-1].assets[0].browser_download_url')
+  if [[ $(basename "$url_alt") < $(basename "$url_main") ]]; then
+    echo "$url_main"
+  else
+    echo "$url_alt"
+  fi
+}
+
 #Getting download links
 printf 'Getting download links...\n'
 
-##ffmpeg
-readonly FFMPEG_URL_MAIN=$(curl -sL4 $FFMPEG_SRC_MAIN | jq -rS 'sort_by(.published_at) | .[-1].assets[0].browser_download_url')
-readonly FFMPEG_URL_ALT=$(curl -sL4 $FFMPEG_SRC_ALT | jq -rS 'sort_by(.published_at) | .[-1].assets[0].browser_download_url')
-[[ $(basename $FFMPEG_URL_ALT) < $(basename $FFMPEG_URL_MAIN) ]] && readonly FFMPEG_URL=$FFMPEG_URL_MAIN || readonly FFMPEG_URL=$FFMPEG_URL_ALT
-if [[ -z $FFMPEG_URL ]]; then
-  printf 'Failed to get ffmpeg download URL. Exiting...\n'
-  exit 1
-fi
+##Fetch all release data once
+RELEASES_MAIN=$(curl -sL4 "$FFMPEG_SRC_MAIN?per_page=50")
+RELEASES_ALT=$(curl -sL4 "$FFMPEG_SRC_ALT?per_page=50")
 
 ##Widevine
 if $FIX_WIDEVINE; then
   readonly WIDEVINE_URL=$(curl -sL4 $WIDEVINE_SRC | jq -r '.vendors."gmp-widevinecdm".platforms."Linux_x86_64-gcc3".mirrorUrls[0]')
 fi
 
-#Downloading files
-printf 'Downloading files...\n'
+#Downloading Widevine
 mkdir -p "$FIX_DIR"
-##ffmpeg
-
-curl -L4 --progress-bar $FFMPEG_URL -o "$FIX_DIR/ffmpeg.zip"
-if [ $? -ne 0 ]; then
-  printf 'Failed to download ffmpeg. Check your internet connection or try later\n'
-  exit 1
-fi
-##Widevine
-if $FIX_WIDEVINE;  then
+if $FIX_WIDEVINE; then
+  printf 'Downloading Widevine CDM...\n'
+  echo -e "From URL: $WIDEVINE_URL\n"
   curl -L4 --progress-bar "$WIDEVINE_URL" -o "$FIX_DIR/widevine.zip"
   if [ $? -ne 0 ]; then
     printf 'Failed to download Widevine CDM. Check your internet connection or try later\n'
     exit 1
   fi
+  echo "Extracting WidevineCDM..."
+  unzip -oj "$FIX_DIR/widevine.zip" -d "$FIX_DIR" > /dev/null 2>/dev/null
 fi
 
-#Extracting files
-##ffmpeg
-echo "Extracting ffmpeg..."
-unzip -o "$FIX_DIR/ffmpeg.zip" -d $FIX_DIR > /dev/null
-##Widevine
-if $FIX_WIDEVINE; then
-  echo "Extracting WidevineCDM..."
-  unzip -oj "$FIX_DIR/widevine.zip" -d $FIX_DIR > /dev/null 2>/dev/null
-fi
+LAST_FFMPEG_TAG=""
 
 for opera in ${OPERA_VERSIONS[@]}; do
   echo "Doing $opera"
@@ -117,6 +154,40 @@ for opera in ${OPERA_VERSIONS[@]}; do
 	else
 		OPERA_DIR=$(dirname $(readlink -f $EXECUTABLE))
 	fi
+
+  CHROMIUM_MAJOR=$(get_chromium_major "$OPERA_DIR" "$opera")
+  if [[ -n "$CHROMIUM_MAJOR" ]]; then
+    printf 'Detected Chromium %s for %s\n' "$CHROMIUM_MAJOR" "$opera"
+    FFMPEG_MATCH=$(get_ffmpeg_url_for_chromium "$CHROMIUM_MAJOR")
+    if [[ -n "$FFMPEG_MATCH" ]]; then
+      FFMPEG_TAG=$(echo "$FFMPEG_MATCH" | cut -f1)
+      FFMPEG_URL=$(echo "$FFMPEG_MATCH" | cut -f2)
+    else
+      printf 'WARNING: No ffmpeg release found for Chromium %s, using latest\n' "$CHROMIUM_MAJOR"
+      FFMPEG_TAG="latest"
+      FFMPEG_URL=$(get_latest_ffmpeg_url)
+    fi
+  else
+    printf 'WARNING: Could not detect Chromium version for %s, using latest ffmpeg\n' "$opera"
+    FFMPEG_TAG="latest"
+    FFMPEG_URL=$(get_latest_ffmpeg_url)
+  fi
+
+  if [[ "$FFMPEG_TAG" != "$LAST_FFMPEG_TAG" ]]; then
+    printf 'Downloading ffmpeg (%s)...\n' "$FFMPEG_TAG"
+    echo -e "From: $FFMPEG_URL\n"
+    curl -L4 --progress-bar "$FFMPEG_URL" -o "$FIX_DIR/ffmpeg.zip"
+    if [ $? -ne 0 ]; then
+      printf 'Failed to download ffmpeg. Check your internet connection or try later\n'
+      exit 1
+    fi
+    echo "Extracting ffmpeg..."
+    unzip -o "$FIX_DIR/ffmpeg.zip" -d "$FIX_DIR" > /dev/null
+    LAST_FFMPEG_TAG="$FFMPEG_TAG"
+  else
+    printf 'Using cached ffmpeg (%s)\n' "$FFMPEG_TAG"
+  fi
+
   OPERA_LIB_DIR="$OPERA_DIR/lib_extra"
   OPERA_WIDEVINE_DIR="$OPERA_LIB_DIR/WidevineCdm"
   OPERA_WIDEVINE_SO_DIR="$OPERA_WIDEVINE_DIR/_platform_specific/linux_x64"
