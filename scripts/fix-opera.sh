@@ -104,6 +104,16 @@ for opera in ${OPERA_VERSIONS[@]}; do
   EXECUTABLE=$(command -v "$opera")
 	if [[ "$ARCH_SYSTEM" == true ]]; then
 		OPERA_DIR=$(dirname $(cat $EXECUTABLE | grep exec | cut -d ' ' -f 2))
+	elif head -1 "$EXECUTABLE" | grep -q 'bash\|sh'; then
+		# The executable is a shell wrapper (e.g. openSUSE packages Opera as a wrapper
+		# script). readlink -f on a script returns the script itself, not the real binary,
+		# so we parse the LIBDIR variable directly from the wrapper instead.
+		PARSED_LIBDIR=$(grep '^LIBDIR=' "$EXECUTABLE" | head -1 | sed 's/LIBDIR=//;s/"//g' | sed "s/\\\$PROGNAME/$opera/g")
+		if [[ -n "$PARSED_LIBDIR" && -d "$PARSED_LIBDIR" ]]; then
+			OPERA_DIR="$PARSED_LIBDIR"
+		else
+			OPERA_DIR=$(dirname $(readlink -f $EXECUTABLE))
+		fi
 	else
 		OPERA_DIR=$(dirname $(readlink -f $EXECUTABLE))
 	fi
@@ -135,6 +145,23 @@ for opera in ${OPERA_VERSIONS[@]}; do
     cp -f "$FIX_DIR/$WIDEVINE_MANIFEST_NAME" "$OPERA_WIDEVINE_DIR"
     chmod 0644 "$OPERA_WIDEVINE_DIR/$WIDEVINE_MANIFEST_NAME"
     printf "[\n      {\n         \"preload\": \"$OPERA_WIDEVINE_DIR\"\n      }\n]\n" > "$OPERA_WIDEVINE_CONFIG"
+
+    # Newer Chromium-based Opera versions (110+) no longer read widevine_config.json.
+    # On zypper-based systems (openSUSE) Opera reads OPERA_FLAGS from /etc/default/opera,
+    # so we inject --widevine-cdm-path there as well to cover both loading mechanisms.
+    if command -v zypper &>/dev/null && [[ -f /etc/default/$opera ]]; then
+      OPERA_DEFAULT="/etc/default/$opera"
+      CDM_FLAG="--widevine-cdm-path=$OPERA_WIDEVINE_DIR"
+      if grep -q 'OPERA_FLAGS=' "$OPERA_DEFAULT"; then
+        # Append the flag if not already present
+        if ! grep -qF -- "$CDM_FLAG" "$OPERA_DEFAULT"; then
+          sed -i "s|OPERA_FLAGS=\"\(.*\)\"|OPERA_FLAGS=\"\1 $CDM_FLAG\"|" "$OPERA_DEFAULT"
+        fi
+      else
+        echo "OPERA_FLAGS=\"$CDM_FLAG\"" >> "$OPERA_DEFAULT"
+      fi
+      printf "Widevine CDM path added to %s\n" "$OPERA_DEFAULT"
+    fi
   fi
 done
 
