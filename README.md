@@ -1,3 +1,11 @@
+> [!WARNING]
+> Make sure, you're using latest version of this script. If not, update it (run installation steps again, say "n" when it asks for creating alias).
+> 
+> Since the may, 16th it doesn't get the latest libffmpeg, but checks for version compatibility.
+
+> [!NOTE]
+> All future versions of libffmpeg will be posted in https://github.com/Ld-Hagen/nwjs-ffmpeg-prebuilt/releases instead of this repo.
+
 # Fix Opera Linux libffmpeg & WidevineCdm
 
 * Fixes Opera html5 media content including DRM-protected one.
